@@ -1,0 +1,66 @@
+1. Connect Your NUCLEO-F401RE Board
+
+    USB Connection: Plug your board’s USB cable into one of the Raspberry Pi 2B’s USB ports.
+
+    Device Identification: After plugging in the board, check the connected device by running:
+
+    dmesg | grep tty
+
+    Look for a device like /dev/ttyACM0 (or possibly /dev/ttyUSB0). This is the serial device representing your board.
+
+2. Install a Terminal Emulator
+
+You can use any serial terminal emulator. Two popular choices are screen and minicom.
+Using screen:
+
+    Install screen (if not already installed):
+
+sudo apt-get update
+sudo apt-get install screen
+
+Start a screen session: Replace /dev/ttyACM0 with the actual device name and ensure that the baud rate (9600 in this case) matches your program’s configuration:
+
+    screen /dev/ttyACM0 9600
+
+    Usage: Once in screen, type your coordinates and press Enter. Your board will echo back the coordinates as programmed.
+
+Using minicom:
+
+    Install minicom:
+
+sudo apt-get update
+sudo apt-get install minicom
+
+Start minicom with appropriate settings:
+
+    minicom -b 9600 -D /dev/ttyACM0
+
+    Usage: With minicom open, simply type the coordinates followed by Enter.
+
+3. Sending Coordinates
+
+    Manual Entry Mode (if applicable):
+    If your firmware allows switching to a manual coordinate entry mode (for example, by pressing m), follow the prompt that appears when you start your session. Otherwise, just type in your coordinates (for instance, 10,20) and press Enter.
+
+    Processing:
+    Your NUCLEO-F401RE board will receive the data and process it as per your code. You should see a response message confirming the coordinates received (or indicating manual mode if enabled).
+
+4. Troubleshooting
+
+    Device Permissions:
+    If you run into a “Permission denied” error accessing the serial device, try running your terminal emulator with sudo or add your user to the dialout group:
+
+    sudo usermod -a -G dialout $USER
+
+    Then, log out and back in or reboot for the changes to take effect.
+
+    Exiting Screen or Minicom:
+
+        Screen: To exit, press Ctrl+A followed by K (to kill the session) and confirm with Y.
+
+        Minicom: Press Ctrl+A then Z to view help and X to exit.
+
+    Device File Variations:
+    If your board shows up under a different device name (like /dev/ttyUSB0), just replace that in your terminal commands.
+
+Following these steps will allow you to send coordinate data from your Raspberry Pi 2B’s terminal to your NUCLEO-F401RE board over USB. The key difference from the Pi 5 is usually just the environment setup and possibly the pre-installed software; the serial communication process itself remains essentially unchanged.
