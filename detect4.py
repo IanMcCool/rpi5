@@ -56,58 +56,10 @@ def center_bound(xmin, ymin, xmax, ymax, frame_x, frame_y):
     
     #return and cast as int for pwm values
     return int(offset_x), int(offset_y)
+    
+def send_and_wait_for_echo(offset_x, offset_y):
+    
 
-def get_quadrant(x, y, frame_width, frame_height):
-    """
-    Determine which quadrant a point (x, y) is in:
-    1: Top-Left
-    2: Top-Right
-    3: Bottom-Left
-    4: Bottom-Right
-    """
-    mid_x = frame_width // 2
-    mid_y = frame_height // 2
-    
-    if x < mid_x and y < mid_y:
-        return 1  # Top-Left
-    elif x >= mid_x and y < mid_y:
-        return 2  # Top-Right
-    elif x < mid_x and y >= mid_y:
-        return 3  # Bottom-Left
-    else:
-        return 4  # Bottom-Right
-
-def draw_quadrants(frame):
-    """Draw quadrant lines on the frame."""
-    height, width = frame.shape[:2]
-    mid_x = width // 2
-    mid_y = height // 2
-    
-    # Draw vertical line
-    cv2.line(frame, (mid_x, 0), (mid_x, height), (255, 255, 255), 1)
-    # Draw horizontal line
-    cv2.line(frame, (0, mid_y), (width, mid_y), (255, 255, 255), 1)
-    
-    # Label quadrants
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.5
-    font_thickness = 1
-    font_color = (255, 255, 255)
-    
-    # Quadrant 1: Top-Left
-    cv2.putText(frame, "Q1", (mid_x//2 - 10, mid_y//2), font, font_scale, font_color, font_thickness)
-    # Quadrant 2: Top-Right
-    cv2.putText(frame, "Q2", (mid_x + mid_x//2 - 10, mid_y//2), font, font_scale, font_color, font_thickness)
-    # Quadrant 3: Bottom-Left
-    cv2.putText(frame, "Q3", (mid_x//2 - 10, mid_y + mid_y//2), font, font_scale, font_color, font_thickness)
-    # Quadrant 4: Bottom-Right
-    cv2.putText(frame, "Q4", (mid_x + mid_x//2 - 10, mid_y + mid_y//2), font, font_scale, font_color, font_thickness)
-    
-def send_and_wait_for_echo(offset_x, offset_y, quadrant=None):
-    """
-    Send offset values to the NucleoF401RE and wait for echo.
-    Now includes optional quadrant parameter for future use.
-    """
     # 2) Build the ASCII message "(a,b)\r\n"
     expected = f"({offset_x},{offset_y})"
     msg = expected + "\r\n"
@@ -135,13 +87,51 @@ def send_and_wait_for_echo(offset_x, offset_y, quadrant=None):
             break
         # otherwise loop again (you could log a warning here)
         
+def draw_quadrants(frame):
+    """Draw lines to divide the frame into four equal quadrants"""
+    height, width = frame.shape[:2]
+    
+    # Calculate center points
+    center_x = width // 2
+    center_y = height // 2
+    
+    # Draw horizontal line
+    cv2.line(frame, (0, center_y), (width, center_y), (255, 255, 255), 1)
+    
+    # Draw vertical line
+    cv2.line(frame, (center_x, 0), (center_x, height), (255, 255, 255), 1)
+    
+    # Add quadrant labels
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    thickness = 1
+    
+    # Quadrant 1 (top-left)
+    cv2.putText(frame, "Q1", (10, center_y - 10), 
+                font, font_scale, (255, 255, 255), thickness)
+    
+    # Quadrant 2 (top-right)
+    cv2.putText(frame, "Q2", (width - 30, center_y - 10), 
+                font, font_scale, (255, 255, 255), thickness)
+    
+    # Quadrant 3 (bottom-left)
+    cv2.putText(frame, "Q3", (10, height - 10), 
+                font, font_scale, (255, 255, 255), thickness)
+    
+    # Quadrant 4 (bottom-right)
+    cv2.putText(frame, "Q4", (width - 30, height - 10), 
+                font, font_scale, (255, 255, 255), thickness)
+    
+    return frame
+        
+
 def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
     while True:
         frame = get_frame_func()
         if frame is None:
             continue
-            
-        # Draw quadrant lines
+        
+        # Draw quadrants on the frame
         draw_quadrants(frame)
         
         # Run inference
@@ -174,22 +164,12 @@ def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
                     center_x = (xmin + xmax) / 2
                     center_y = (ymin + ymax) / 2
                     
-                    # Determine which quadrant the person is in
-                    quadrant = get_quadrant(int(center_x), int(center_y), frame_width, frame_height)
-                    
-                    # Display the center point of the person
                     cv2.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
+                    print(f"Person detected. Offset (x, y): ({offset_x}, {offset_y})")
                     
-                    # Display quadrant info on the frame
-                    quadrant_text = f"Q{quadrant}"
-                    cv2.putText(frame, quadrant_text, (int(center_x) + 10, int(center_y) + 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    send_and_wait_for_echo(offset_x, offset_y)
                     
-                    print(f"Person detected. Offset (x, y): ({offset_x}, {offset_y}), Quadrant: {quadrant}")
-                    
-                    # Pass quadrant info to the send function for future use
-                    send_and_wait_for_echo(offset_x, offset_y, quadrant)
-                    
+                
         cv2.imshow('YOLO detection results', frame)
         if cv2.waitKey(1) in [ord('q'), ord('Q')]:
             break
