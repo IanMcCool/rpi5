@@ -6,6 +6,20 @@ import numpy as np
 from ultralytics import YOLO
 from picamera2 import Picamera2
 
+# ─── CONFIGURATION ────────────────────────────────────────────────────────────
+RESOLUTION   = (640, 480)
+TARGET_FPS   = 60
+
+FRAME_WIDTH, FRAME_HEIGHT = RESOLUTION
+DEAD_FRAC    = 0.30  # central 30% dead‑zone
+DEAD_X       = int(FRAME_WIDTH  * DEAD_FRAC * 0.5)  # ±15% of width
+DEAD_Y       = int(FRAME_HEIGHT * DEAD_FRAC * 0.5)  # ±15% of height
+
+MODEL_PATH   = "/home/XenaPi/yolo/yolov8n_ncnn_model"
+THRESHOLD    = 0.5
+# ────────────────────────────────────────────────────────────────────────────────
+
+# Set up serial
 try:
     serial_port = serial.Serial(port='/dev/ttyACM0', baudrate=9600, timeout=1)
     print("Serial port opened successfully.")
@@ -14,13 +28,12 @@ except Exception as e:
     serial_port = None
 
 class PiCameraStream:
-    def __init__(self, resolution=(640, 480), target_fps=60):
+    def __init__(self, resolution=RESOLUTION, target_fps=TARGET_FPS):
         self.camera = Picamera2()
         config = self.camera.create_video_configuration(
             main={"format": "XRGB8888", "size": resolution}
         )
         self.camera.configure(config)
-        # Request a higher frame rate (ensure the sensor mode supports this)
         self.camera.set_controls({"FrameRate": target_fps})
         self.camera.start()
         self.frame = None
@@ -41,166 +54,105 @@ class PiCameraStream:
     def stop(self):
         self.stopped = True
         self.camera.stop()
-        
 
 def center_bound(xmin, ymin, xmax, ymax, frame_x, frame_y):
-    box_x = (xmin + xmax)/2
-    box_y = (ymin + ymax)/2
-    
-    #creating a var for frame allows us to get center and change res
-    frame_x_center = frame_x/2
-    frame_y_center = frame_y/2
-        
+    box_x = (xmin + xmax) / 2
+    box_y = (ymin + ymax) / 2
+    frame_x_center = frame_x / 2
+    frame_y_center = frame_y / 2
     offset_x = frame_x_center - box_x
     offset_y = frame_y_center - box_y
-    
-    #return and cast as int for pwm values
     return int(offset_x), int(offset_y)
-    
-def send_and_wait_for_echo(offset_x, offset_y):
-    
 
-    # 2) Build the ASCII message "(a,b)\r\n"
+def send_and_wait_for_echo(offset_x, offset_y):
     expected = f"({offset_x},{offset_y})"
     msg = expected + "\r\n"
-
     if not (serial_port and serial_port.is_open):
         print("No serial port; would send:", expected)
         return
-
-    # 3) Clear any old input, send and flush
     serial_port.reset_input_buffer()
     serial_port.write(msg.encode('ascii'))
     serial_port.flush()
     print("Sent:", expected)
 
-    # 4) Block here until we get exactly that same line back
+    # wait for exact echo
     while True:
-        line = serial_port.readline()              # waits for '\n'
+        line = serial_port.readline()
         if not line:
-            # nothing received yet, keep waiting
             continue
         echo = line.decode('ascii', errors='ignore').strip()
         print("Echo:", echo)
         if echo == expected:
-            # got the correct echo, break out and allow the next pair
             break
-        # otherwise loop again (you could log a warning here)
-        
-def draw_quadrants(frame):
-    """Draw lines to divide the frame into four equal quadrants"""
-    height, width = frame.shape[:2]
-    
-    # Calculate center points
-    center_x = width // 2
-    center_y = height // 2
-    
-    # Draw horizontal line
-    cv2.line(frame, (0, center_y), (width, center_y), (255, 255, 255), 1)
-    
-    # Draw vertical line
-    cv2.line(frame, (center_x, 0), (center_x, height), (255, 255, 255), 1)
-    
-    # Add quadrant labels
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.5
-    thickness = 1
-    
-    # Quadrant 1 (top-left)
-    cv2.putText(frame, "Q1", (10, center_y - 10), 
-                font, font_scale, (255, 255, 255), thickness)
-    
-    # Quadrant 2 (top-right)
-    cv2.putText(frame, "Q2", (width - 30, center_y - 10), 
-                font, font_scale, (255, 255, 255), thickness)
-    
-    # Quadrant 3 (bottom-left)
-    cv2.putText(frame, "Q3", (10, height - 10), 
-                font, font_scale, (255, 255, 255), thickness)
-    
-    # Quadrant 4 (bottom-right)
-    cv2.putText(frame, "Q4", (width - 30, height - 10), 
-                font, font_scale, (255, 255, 255), thickness)
-    
-    return frame
-        
 
 def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
+    print(f"Dead‑zone = ±({DEAD_X}, {DEAD_Y}) pixels")
     while True:
         frame = get_frame_func()
         if frame is None:
             continue
-        
-        # Draw quadrants on the frame
-        draw_quadrants(frame)
-        
-        # Run inference
+
         results = model(frame, verbose=False)
         detections = results[0].boxes
-        # Draw detections
-        for detection in detections:
-            xyxy_tensor = detection.xyxy.cpu()
-            xyxy = xyxy_tensor.numpy().squeeze()  # [xmin, ymin, xmax, ymax]
-            xmin, ymin, xmax, ymax = xyxy.astype(int)
-            #print("offset x:", {my_offset_x}, "\n offset y:", {my_offset_y})
-            classidx = int(detection.cls.item())
-            classname = labels[classidx]
-            conf = detection.conf.item()
-            if conf > threshold:
-                color = bbox_colors[classidx % len(bbox_colors)]
-                cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
-                label = f'{classname}: {int(conf * 100)}%'
-                labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                label_ymin = max(ymin, labelSize[1] + 10)
-                cv2.rectangle(frame, (xmin, label_ymin - labelSize[1] - 10),
-                              (xmin + labelSize[0], label_ymin + baseLine - 10), color, cv2.FILLED)
-                cv2.putText(frame, label, (xmin, label_ymin - 7),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-                
-                if classname.lower() == 'person':
-                    frame_height, frame_width = frame.shape[:2]
-                    offset_x, offset_y = center_bound(xmin, ymin, xmax, ymax, frame_width, frame_height)
-                    
-                    center_x = (xmin + xmax) / 2
-                    center_y = (ymin + ymax) / 2
-                    
-                    cv2.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
-                    print(f"Person detected. Offset (x, y): ({offset_x}, {offset_y})")
-                    
+
+        for det in detections:
+            xmin, ymin, xmax, ymax = det.xyxy.cpu().numpy().squeeze().astype(int)
+            cls_idx = int(det.cls.item())
+            classname = labels[cls_idx]
+            conf = det.conf.item()
+
+            if conf < threshold:
+                continue
+
+            color = bbox_colors[cls_idx % len(bbox_colors)]
+            cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
+            label = f"{classname}: {int(conf*100)}%"
+            cv2.putText(frame, label, (xmin, ymin - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+            if classname.lower() == 'person':
+                h, w = frame.shape[:2]
+                offset_x, offset_y = center_bound(xmin, ymin, xmax, ymax, w, h)
+                cx = int((xmin + xmax) / 2)
+                cy = int((ymin + ymax) / 2)
+                cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+
+                # only send when outside dead‑zone
+                if abs(offset_x) > DEAD_X or abs(offset_y) > DEAD_Y:
+                    print(f"Offset ({offset_x},{offset_y}) outside DZ")
                     send_and_wait_for_echo(offset_x, offset_y)
-                    
-                
+                else:
+                    print(f"Within dead‑zone ±({DEAD_X},{DEAD_Y}); no send")
+
         cv2.imshow('YOLO detection results', frame)
-        if cv2.waitKey(1) in [ord('q'), ord('Q')]:
+        if cv2.waitKey(1) in (ord('q'), ord('Q')):
             break
 
 def main():
-    # Set up the PiCamera stream with high target FPS
-    stream = PiCameraStream(resolution=(640, 480), target_fps=60)
-    capture_thread = threading.Thread(target=stream.update, daemon=True)
-    capture_thread.start()
+    # camera capture thread
+    stream = PiCameraStream()
+    cap_thread = threading.Thread(target=stream.update, daemon=True)
+    cap_thread.start()
 
-    # Load YOLO model; adjust the model path as needed
-    model_path = "/home/XenaPi/yolo/yolov8n_ncnn_model"
-    model = YOLO(model_path, task='detect')
+    # load model
+    model = YOLO(MODEL_PATH, task='detect')
     labels = model.names
-    threshold = 0.5
     bbox_colors = [
-        (164, 120, 87), (68, 148, 228), (93, 97, 209), (178, 182, 133), (88, 159, 106),
-        (96, 202, 231), (159, 124, 168), (169, 162, 241), (98, 118, 150), (172, 176, 184)
+        (164, 120, 87), (68, 148, 228), (93, 97, 209),
+        (178, 182, 133), (88, 159, 106), (96, 202, 231),
+        (159, 124, 168), (169, 162, 241), (98, 118, 150),
+        (172, 176, 184)
     ]
 
-    # Start inference in a dedicated thread so capture and inference run concurrently.
-    inference_thread = threading.Thread(
+    inf_thread = threading.Thread(
         target=inference_loop,
-        args=(stream.read, model, labels, threshold, bbox_colors),
+        args=(stream.read, model, labels, THRESHOLD, bbox_colors),
         daemon=True
     )
-    inference_thread.start()
+    inf_thread.start()
 
-    # Keep the main thread alive until user quits
     try:
-        while inference_thread.is_alive():
+        while inf_thread.is_alive():
             time.sleep(0.1)
     except KeyboardInterrupt:
         pass
