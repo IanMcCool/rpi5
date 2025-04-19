@@ -19,7 +19,7 @@ M_TILT = 2.85714
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', help='Path to YOLO model file (example: "runs/detect/train/weights/best.pt")',
-                    required=True)
+                    default='/home/XenaPi/yolo/yolov8n_ncnn_model')
 parser.add_argument('--source', help='Image source, can be image file ("test.jpg"), \
                     image folder ("test_dir"), video file ("testvid.mp4"), or index of USB camera ("usb0")', 
                     default='picamera0')
