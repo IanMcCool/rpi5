@@ -13,6 +13,19 @@ try:
 except Exception as e:
     print("Failed to open serial port:", e)
     serial_port = None
+    
+def send_and_wait_for_echo(duty_pan, duty_tilt):
+    """Send PWM values to microcontroller and display in terminal"""
+    # Format the values with exactly 6 decimal places
+    msg = f"{duty_pan:.6f} {duty_tilt:.6f}\r\n"
+    if not (serial_port and serial_port.is_open):
+        print("No serial port; would send:", msg.strip())
+        return
+    # clear old input, send and flush
+    serial_port.reset_input_buffer()
+    serial_port.write(msg.encode('ascii'))
+    serial_port.flush()
+    print(f"Sent: Pan={duty_pan:.6f}, Tilt={duty_tilt:.6f}")
 
 # ── CAMERA AND SERVO CONSTANTS ────────────────────────────────────────────
 H_FOV = 54  # degrees
@@ -132,18 +145,12 @@ def angles_to_pwm(pan_angle, tilt_angle):
 
 def send_servo_command(pan_angle, tilt_angle):
     """Convert angles to PWM and send to STM32 via UART"""
-    if serial_port and serial_port.is_open:
-        try:
-            # Convert to PWM values
-            pan_pwm, tilt_pwm = angles_to_pwm(pan_angle, tilt_angle)
-            
-            # Format command as expected by STM32
-            command = f"{pan_pwm:.4f},{tilt_pwm:.4f}\n"
-            serial_port.write(command.encode('utf-8'))
-            return True
-        except Exception as e:
-            print(f"Error sending command: {e}")
-    return False
+    # Convert to PWM values
+    pan_pwm, tilt_pwm = angles_to_pwm(pan_angle, tilt_angle)
+    
+    # Send command using the provided function
+    send_and_wait_for_echo(pan_pwm, tilt_pwm)
+    return True
 
 def draw_tracking_info(frame, xmin, ymin, xmax, ymax, offset_x, offset_y, 
                       current_pan, current_tilt, confidence, color):
@@ -191,6 +198,7 @@ def inference_loop(get_frame_func, model, labels, bbox_colors):
     frame_count = 0
     start_time = time.time()
     skip_frames = 0  # Process every nth frame for slower devices
+    fps = 0  # Initialize fps variable
     
     while True:
         frame = get_frame_func()
@@ -260,8 +268,10 @@ def inference_loop(get_frame_func, model, labels, bbox_colors):
             # Only send commands if angles changed significantly (reduces servo jitter)
             if (abs(new_pan - current_pan) > SIGNIFICANT_ANGLE_CHANGE or 
                 abs(new_tilt - current_tilt) > SIGNIFICANT_ANGLE_CHANGE):
-                if send_servo_command(new_pan, new_tilt):
-                    current_pan, current_tilt = new_pan, new_tilt
+                # Print angle info to terminal
+                print(f"Angle change: Pan={new_pan-current_pan:.2f}°, Tilt={new_tilt-current_tilt:.2f}°")
+                send_servo_command(new_pan, new_tilt)
+                current_pan, current_tilt = new_pan, new_tilt
 
             # Draw all tracking info
             color = bbox_colors[classidx % len(bbox_colors)]
@@ -291,6 +301,12 @@ def main():
     capture_thread = threading.Thread(target=stream.update, daemon=True)
     capture_thread.start()
     print("Camera initialized")
+    
+    # Initialize servos to center position
+    print("Initializing servos to center position...")
+    time.sleep(1)  # Give camera time to start up
+    send_servo_command(CENTER_DEGREE, CENTER_DEGREE)
+    print("-" * 50)  # Print separator line
 
     # Load YOLO model
     model_path = "/home/XenaPi/yolo/yolov8n_ncnn_model"
