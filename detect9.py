@@ -101,14 +101,18 @@ def send_pwm_command(pan_pwm, tilt_pwm):
         try:
             command = f"{pan_pwm:.4f},{tilt_pwm:.4f}\n"
             serial_port.write(command.encode('utf-8'))
+            return command.strip()  # Return the sent command for display
         except Exception as e:
             print("UART send error:", e)
+            return None
+    return None
 
 def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
     """Main detection and tracking loop"""
     current_pan = CENTER_DEGREE
     current_tilt = CENTER_DEGREE
     last_detection_time = time.time()
+    last_pwm_command = "No command sent yet"
     
     while True:
         frame = get_frame_func()
@@ -120,7 +124,9 @@ def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
             if current_pan != CENTER_DEGREE or current_tilt != CENTER_DEGREE:
                 current_pan, current_tilt = CENTER_DEGREE, CENTER_DEGREE
                 pan_pwm, tilt_pwm = angles_to_pwm(current_pan, current_tilt)
-                send_pwm_command(pan_pwm, tilt_pwm)
+                cmd = send_pwm_command(pan_pwm, tilt_pwm)
+                if cmd:
+                    last_pwm_command = cmd
 
         best_detection = None
         max_confidence = threshold
@@ -148,7 +154,9 @@ def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
             # Send commands only if angles changed significantly
             if abs(new_pan - current_pan) > 1 or abs(new_tilt - current_tilt) > 1:
                 pan_pwm, tilt_pwm = angles_to_pwm(new_pan, new_tilt)
-                send_pwm_command(pan_pwm, tilt_pwm)
+                cmd = send_pwm_command(pan_pwm, tilt_pwm)
+                if cmd:
+                    last_pwm_command = cmd
                 current_pan, current_tilt = new_pan, new_tilt
 
             # Draw detection info
@@ -164,8 +172,16 @@ def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
             # Draw crosshair at frame center
             cv2.drawMarker(frame, (CENTER_X_PIXELS, CENTER_Y_PIXELS), 
                          (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+        
+        # Display PWM values in the top-left corner
+        cv2.putText(frame, f"Last PWM Command: {last_pwm_command}", (10, 30),
+                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        # Display current angles
+        cv2.putText(frame, f"Pan: {current_pan:.1f}° Tilt: {current_tilt:.1f}°", (10, 60),
+                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        cv2.imshow('Person Tracking', frame)
+        cv2.imshow('Person Tracking with PWM Output', frame)
         if cv2.waitKey(1) in [ord('q'), ord('Q')]:
             break
 
