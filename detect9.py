@@ -106,6 +106,23 @@ def send_pwm_command(pan_pwm, tilt_pwm):
             print("UART send error:", e)
             return None
     return None
+    
+def send_and_wait_for_echo(pan_pwm, tilt_pwm):
+
+   
+
+    # Format the values with exactly 3 decimal places
+    msg = f"{duty_pan:.6f} {duty_tilt:.6f}\r\n"
+
+    if not (serial_port and serial_port.is_open):
+        print("No serial port; would send:", msg.strip())
+        return
+
+    # clear old input, send and flush
+    serial_port.reset_input_buffer()
+    serial_port.write(msg.encode('ascii'))
+    serial_port.flush()
+    print(f"Sent: Pan={pan_pwm:.6f}, Tilt={pan_pwm:.6f}")
 
 def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
     """Main detection and tracking loop"""
@@ -169,18 +186,8 @@ def inference_loop(get_frame_func, model, labels, threshold, bbox_colors):
             cv2.putText(frame, label, (xmin, ymin - 7),
                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
             
-            # Draw crosshair at frame center
-            cv2.drawMarker(frame, (CENTER_X_PIXELS, CENTER_Y_PIXELS), 
-                         (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+            
         
-        # Display PWM values in the top-left corner
-        cv2.putText(frame, f"Last PWM Command: {last_pwm_command}", (10, 30),
-                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        
-        # Display current angles
-        cv2.putText(frame, f"Pan: {current_pan:.1f}° Tilt: {current_tilt:.1f}°", (10, 60),
-                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
         cv2.imshow('Person Tracking with PWM Output', frame)
         if cv2.waitKey(1) in [ord('q'), ord('Q')]:
             break
