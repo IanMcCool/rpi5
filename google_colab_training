@@ -1,0 +1,53 @@
+#cell 1
+%pip install ultralytics
+import ultralytics
+ultralytics.checks()
+
+#cell2
+# Install the Kaggle API
+!pip install -q kaggle
+
+# Create the .kaggle directory
+!mkdir -p /root/.kaggle
+
+# Move the kaggle.json file to the correct location
+import shutil
+shutil.move('/content/kaggle.json', '/root/.kaggle/kaggle.json')
+
+# Set the correct file permissions
+!chmod 600 /root/.kaggle/kaggle.json
+
+#cell3
+# Download the dataset using Kaggle API
+!kaggle datasets download -d fareselmenshawii/face-detection-dataset -p data/
+!unzip -q data/face-detection-dataset.zip -d data/face_detection
+
+#cell4
+%%bash
+# create a YAML config for Ultralytics YOLO
+cat <<EOF > data.yaml
+path: data/face_detection        # base dir
+train: images/train              # train images (under path)
+val:   images/val                # validation images (under path)
+# no test split provided
+names:
+  0: face                        # class 0 = face
+EOF
+
+
+#cell5
+from ultralytics import YOLO
+
+# 1) choose a backbone (nano is fastest; change to yolov8s.pt or .m.pt for more capacity)
+model = YOLO('yolov11n.pt')
+
+# 2) train!
+model.train(
+    data='data.yaml',   # the file you just created
+    epochs=100,          # adjust as needed
+    imgsz=640,          # image size to train on
+    batch=64,           # adjust to fit GPU memory
+    project='face_det', # where to save results
+    name='exp1'         # experiment name
+
+)
